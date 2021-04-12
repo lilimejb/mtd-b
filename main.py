@@ -1,11 +1,13 @@
 import discord
 from random import choice
+from deck_site.data import db_session
+from deck_site.data.users import User
 from discord.ext import commands
 from pprint import pprint
 import asyncio
 
 TOKEN = "ODI3NTcwMjAyNTcyNjE5ODU2.YGc8zw.l_wWjYdHwvwZX8jc8HnT03BayvU"
-
+db_session.global_init("deck_site/db/mtd_decks.db")
 
 class MtgBot(commands.Bot):
     def __init__(self, *args, **kwargs):
@@ -60,10 +62,11 @@ class MtgCommands(commands.Cog):
                 await ctx.send("Игра началась!\n" +
                                f"Участники сегодняшней игры:\n" +
                                f"{', '.join(member.mention for member in cur_game.get_members(True))}\n" +
-                               f"Подходящее количество туров: {rounds_to_play}")
+                               f"Количество туров: {rounds_to_play}")
                 await ctx.send("Через 30 секунд автоматически начнётся 1 тур")
                 await asyncio.sleep(10)
-                await self.start_tour(ctx)
+                if cur_game.is_startable():
+                    await self.start_tour(ctx)
 
     @commands.command(name='parings')
     async def parings(self, ctx):
@@ -80,56 +83,73 @@ class MtgCommands(commands.Cog):
     @commands.command(name='start_tour')
     async def start_tour(self, ctx):
         cur_game = self.bot.games[ctx.channel]
-        tour = cur_game.update_round()
-        if tour == -1:
-            await self.end_game(ctx)
+        try:
+            cur_game.start_tour()
+        except Exception as ex:
+            await ctx.send(ex)
         else:
-            self.pares = cur_game.make_pares()
+            tour = cur_game.update_round()
+            if tour == -1:
+                await self.end_game(ctx)
+            else:
+                self.pares = cur_game.make_pares()
 
-            pprint(self.pares)
+                pprint(self.pares)
 
-            pares_to_print = ''
-            for key, value in self.pares.items():
-                if value == 'auto_win':
-                    pares_to_print += f'{key.mention} остался без пары и проходит в следуюущий тур!\n'
-                else:
-                    pares_to_print += f'{key.mention} против {value.mention}\n'
-            await ctx.send(f"Паринги {tour} тура:\n" +
-                           f"{pares_to_print}\n" +
-                           'У вас есть 1 час на тур')
-            await asyncio.sleep(10)
-            await self.end_tour(ctx)
+                pares_to_print = ''
+                for key, value in self.pares.items():
+                    if value == 'auto_win':
+                        pares_to_print += f'{key.mention} остался без пары и проходит в следуюущий тур!\n'
+                    else:
+                        pares_to_print += f'{key.mention} против {value.mention}\n'
+                await ctx.send(f"Паринги {tour} тура:\n" +
+                               f"{pares_to_print}\n" +
+                               'У вас есть 1 час на тур')
+                await asyncio.sleep(10)
+                if cur_game.is_endable():
+                    await self.end_tour(ctx)
 
     @commands.command(name='end_tour')
     async def end_tour(self, ctx):
         cur_game = self.bot.games[ctx.channel]
-        # TODO сделать создание новых парингов
-        await ctx.send('У вас есть 2 минуты, чтобы внести результаты дуэлей в таблицу,\n' +
-                       'с помощью команды "mtg! result {win/lose/draw}"\n'+
-                       'Если у вас автоматическая победа результаты вводить не нужно')
-        cur_game.can_write_results = True
-        cur_game.give_auto_points(self.pares)
-        await asyncio.sleep(10)
-        await ctx.send('Время на запись результатов закончено. Все неуспевшие получают 0 очков за тур')
-        cur_game.can_write_results = False
-        await self.start_tour(ctx)
+        try:
+            cur_game.end_tour()
+        except Exception as ex:
+            await ctx.send(ex)
+        else:
+            # TODO сделать создание новых парингов
+            await ctx.send('У вас есть 2 минуты, чтобы внести результаты дуэлей в таблицу,\n' +
+                           'с помощью команды "mtg! result {win/lose/draw}"\n'+
+                           'Если у вас автоматическая победа результаты вводить не нужно')
+            cur_game.can_write_results = True
+            cur_game.give_auto_points(self.pares)
+            await asyncio.sleep(10)
+            await ctx.send('Время на запись результатов закончено. Все неуспевшие получают 0 очков за тур')
+            cur_game.can_write_results = False
+            if cur_game.is_startable():
+                await self.start_tour(ctx)
 
     @commands.command(name='result')
     async def result(self, ctx, result):
         cur_game = self.bot.games[ctx.channel]
         result = result.lower()
         member = ctx.message.author
-        cur_game.give_points(member, result, self.pares)
-        members = cur_game.get_members()
-        result_to_print = ''
-        for key, value in members.items():
-            result_to_print += f'{key.name}: {value}\n'
-        await ctx.send(f'{result_to_print}')
+        try:
+            cur_game.give_points(member, result, self.pares)
+        except Exception as ex:
+            await ctx.send(ex)
+        else:
+            members = cur_game.get_members()
+            result_to_print = ''
+            for key, value in members.items():
+                result_to_print += f'{key.name}: {value}\n'
+            await ctx.send(f'{result_to_print}')
 
     @commands.command(name='end_game')
     async def end_game(self, ctx):
         cur_game = self.bot.games[ctx.channel]
         winners = cur_game.get_winners()
+        cur_game.end_game()
         if len(winners) < 3:
             await ctx.send('Игра окончена\n' +
                            f'1 место: {winners[0][0].name} c {winners[0][1]} количеством очков\n' +
@@ -158,13 +178,24 @@ class Game:
         self.cur_round = 0
         self.rounds_to_play = None
         self.can_write_results = False
+        self.startable = True
+        self.endable = False
 
     def add_member(self, member):
         if self.joinable:
             if member in self.members.keys():
                 raise ValueError(f"{member.mention}, ты уже в игре!")
             else:
-                self.members[member] = 0
+                db_sess = db_session.create_session()
+                user = db_sess.query(User).all()
+                in_table = False
+                for pers in user:
+                    if str(member) == str(pers.username):
+                        in_table = True
+                if in_table:
+                    self.members[member] = 0
+                else:
+                    raise ValueError('Для того, чтобы приянть участие в турнире нужно зарегистрироваться на сайте')
         else:
             raise ValueError('Сбор игроков уже завершен')
 
@@ -176,6 +207,26 @@ class Game:
                 raise ValueError('Нельзя начать игру, в которой нет игроков')
         else:
             raise ValueError('Сбор игроков уже завершен')
+
+    def start_tour(self):
+        if self.startable:
+            self.startable = False
+            self.endable = True
+        else:
+            raise ValueError('Тур уже начался')
+
+    def is_startable(self):
+        return self.startable
+
+    def end_tour(self):
+        if self.endable:
+            self.endable = False
+            self.startable = True
+        else:
+            raise ValueError('Нельзя закончить не начатый тур')
+
+    def is_endable(self):
+        return self.endable
 
     def make_pares(self):
         members = [member for member in self.members.keys()]
@@ -230,11 +281,12 @@ class Game:
                                 self.members[key] += 1
                                 self.members[value] += 1
                                 break
+        else:
+            raise ValueError('Сейчас не время записи результатов')
 
     def update_round(self):
         # начало нового раунда
-        if self.cur_round == self.rounds_to_play:
-            self.end_game()
+        if self.cur_round == self.rounds_to_play and not self.can_write_results:
             return -1
         else:
             self.cur_round += 1
@@ -248,7 +300,14 @@ class Game:
 
     def end_game(self):
         # заканчивает игру (добовляет файлы в бд)
-        pass
+        db_sess = db_session.create_session()
+        user = db_sess.query(User).all()
+        names = {}
+        for name, point in self.members.items():
+            names[name] = point
+        for pers in user:
+            pers.points += names[pers.username]
+        db_sess.commit()
 
 
 bot = MtgBot(command_prefix='mtg! ')

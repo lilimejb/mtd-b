@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+        <title>{{ title }}</title>
+    </head>
+    <body>
+    {% if current_user.is_authenticated %}
+    <a class="navbar-brand" href="/logout">{{ current_user.name }}</a>
+    {% else %}
+    {% if current_user.is_authenticated %}
+    <a href="decks" class="btn btn-secondary">Добавить колоду</a>
+    {% endif %}
+    <p>
+        <a class="btn btn-primary " href="/register">Зарегистрироваться</a>
+        <a class="btn btn-success" href="/login">Войти</a>
+    </p>
+    {% endif %}
+    <main role="main" class="container">
+        {% block content %}{% endblock %}
+    </main>
+    </body>
+</html>
