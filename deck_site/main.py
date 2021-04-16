@@ -71,7 +71,7 @@ def logout():
 
 @app.route('/decks',  methods=['GET', 'POST'])
 @login_required
-def add_news():
+def add_deck():
     form = DecksForm()
     if form.validate_on_submit():
         db_sess = db_session.create_session()

@@ -2,12 +2,15 @@ import discord
 from random import choice
 from deck_site.data import db_session
 from deck_site.data.users import User
+from deck_site.data.games import Games
 from discord.ext import commands
 from pprint import pprint
 import asyncio
+import datetime
 
 TOKEN = "ODI3NTcwMjAyNTcyNjE5ODU2.YGc8zw.l_wWjYdHwvwZX8jc8HnT03BayvU"
 db_session.global_init("deck_site/db/mtd_decks.db")
+
 
 class MtgBot(commands.Bot):
     def __init__(self, *args, **kwargs):
@@ -27,13 +30,16 @@ class MtgCommands(commands.Cog):
 
     @commands.command(name='create')
     async def start(self, ctx):
+        if ctx.message.channel in self.bot.games.keys():
+            await ctx.send("Игра уже началась")
+            return
         await ctx.send(
             'Начался сбор игроков пишите "mtg! join" чтобы присоедениться,' +
             'через 1 минуту регестрация закончится автоматически')
         self.bot.games[ctx.message.channel] = Game()
-        await asyncio.sleep(10)
-        await ctx.send('Время на регестрацию вышло')
-        await self.end(ctx)
+        await asyncio.sleep(30)
+        if self.bot.games[ctx.message.channel].is_joinable:
+            await self.end(ctx)
 
     @commands.command(name='join')
     async def join(self, ctx):
@@ -52,11 +58,14 @@ class MtgCommands(commands.Cog):
             cur_game_members = [member for member in cur_game.get_members(True)]
             try:
                 cur_game.end_join()
-            except Exception as ex:
+            except ValueError as ex:
                 await ctx.send(ex)
+            except RuntimeError as ex:
+                await ctx.send(ex)
+                self.bot.games.pop(ctx.channel)
             else:
                 rounds_to_play = (len(cur_game_members) // 2) + 1 if len(cur_game_members) % 2 != 0 else (
-                            len(cur_game_members) // 2)
+                        len(cur_game_members) // 2)
                 cur_game.rounds_to_play = rounds_to_play
                 await ctx.send("Сбор игроков закончен")
                 await ctx.send("Игра началась!\n" +
@@ -70,95 +79,98 @@ class MtgCommands(commands.Cog):
 
     @commands.command(name='parings')
     async def parings(self, ctx):
-        name = ctx.message.author
-        if self.pares[name] == 'auto_win':
-            await ctx.send(f"Ты проходишь в следуюущий тур с автоматической победой")
-        if name in self.pares.keys():
-            await ctx.send(f"Твой соперник {self.pares[name].mention}")
-        if name in self.pares.values():
-            for key, value in self.pares.items():
-                if name == value:
-                    await ctx.send(f"Твой соперник {key.mention}")
+        if ctx.channel in self.bot.games.keys():
+            cur_game = self.bot.games[ctx.channel]
+            name = ctx.message.author
+            member1, member2 = cur_game.find_pare(self.pares, name)
+            await ctx.send(f"Ты в паре:\n{member1.mention} vs {member2.mention}")
 
     @commands.command(name='start_tour')
     async def start_tour(self, ctx):
-        cur_game = self.bot.games[ctx.channel]
-        try:
-            cur_game.start_tour()
-        except Exception as ex:
-            await ctx.send(ex)
-        else:
-            tour = cur_game.update_round()
-            if tour == -1:
-                await self.end_game(ctx)
+        if ctx.channel in self.bot.games.keys():
+            cur_game = self.bot.games[ctx.channel]
+            try:
+                cur_game.start_tour()
+            except Exception as ex:
+                await ctx.send(ex)
             else:
-                self.pares = cur_game.make_pares()
+                tour = cur_game.update_round()
+                if tour == -1:
+                    await self.end_game(ctx)
+                else:
+                    cur_game.pares_that_cant_write_results = {}
+                    self.pares = cur_game.make_pares()
 
-                pprint(self.pares)
+                    pprint(self.pares)
 
-                pares_to_print = ''
-                for key, value in self.pares.items():
-                    if value == 'auto_win':
-                        pares_to_print += f'{key.mention} остался без пары и проходит в следуюущий тур!\n'
-                    else:
-                        pares_to_print += f'{key.mention} против {value.mention}\n'
-                await ctx.send(f"Паринги {tour} тура:\n" +
-                               f"{pares_to_print}\n" +
-                               'У вас есть 1 час на тур')
-                await asyncio.sleep(10)
-                if cur_game.is_endable():
-                    await self.end_tour(ctx)
+                    pares_to_print = ''
+                    counter = 1
+                    for key, value in self.pares.items():
+                        if value == 'auto_win':
+                            pares_to_print += f'{counter}. {key.mention} остался без пары и проходит в следуюущий тур!\n'
+                        else:
+                            pares_to_print += f'{counter}. {key.mention} против {value.mention}\n'
+                        counter += 1
+                    await ctx.send(f"Паринги {tour} тура:\n" +
+                                   f"{pares_to_print}\n" +
+                                   'У вас есть 1 час на тур')
+                    await asyncio.sleep(10)
+                    if cur_game.is_endable():
+                        await self.end_tour(ctx)
 
     @commands.command(name='end_tour')
     async def end_tour(self, ctx):
-        cur_game = self.bot.games[ctx.channel]
-        try:
-            cur_game.end_tour()
-        except Exception as ex:
-            await ctx.send(ex)
-        else:
-            # TODO сделать создание новых парингов
-            await ctx.send('У вас есть 2 минуты, чтобы внести результаты дуэлей в таблицу,\n' +
-                           'с помощью команды "mtg! result {win/lose/draw}"\n'+
-                           'Если у вас автоматическая победа результаты вводить не нужно')
-            cur_game.can_write_results = True
-            cur_game.give_auto_points(self.pares)
-            await asyncio.sleep(10)
-            await ctx.send('Время на запись результатов закончено. Все неуспевшие получают 0 очков за тур')
-            cur_game.can_write_results = False
-            if cur_game.is_startable():
-                await self.start_tour(ctx)
+        if ctx.channel in self.bot.games.keys():
+            cur_game = self.bot.games[ctx.channel]
+            try:
+                cur_game.end_tour()
+            except Exception as ex:
+                await ctx.send(ex)
+            else:
+                await ctx.send('У вас есть 2 минуты, чтобы внести результаты дуэлей в таблицу,\n' +
+                               'с помощью команды "mtg! result {win/lose/draw}"\n' +
+                               'Если у вас автоматическая победа результаты вводить не нужно')
+                cur_game.can_write_results = True
+                cur_game.give_auto_points(self.pares)
+                await asyncio.sleep(120)
+                cur_game.can_write_results = False
+                if cur_game.is_startable():
+                    await ctx.send('Время на запись результатов закончено. Все неуспевшие получают 0 очков за тур')
+                    await self.start_tour(ctx)
 
     @commands.command(name='result')
     async def result(self, ctx, result):
-        cur_game = self.bot.games[ctx.channel]
-        result = result.lower()
-        member = ctx.message.author
-        try:
-            cur_game.give_points(member, result, self.pares)
-        except Exception as ex:
-            await ctx.send(ex)
-        else:
-            members = cur_game.get_members()
-            result_to_print = ''
-            for key, value in members.items():
-                result_to_print += f'{key.name}: {value}\n'
-            await ctx.send(f'{result_to_print}')
+        if ctx.channel in self.bot.games.keys():
+            cur_game = self.bot.games[ctx.channel]
+            result = result.lower()
+            member = ctx.message.author
+            try:
+                cur_game.give_points(member, result, self.pares)
+            except Exception as ex:
+                await ctx.send(ex)
+            else:
+                member1, member2 = cur_game.find_pare(self.pares, member)
+                member1, points1, member2, points2 = cur_game.get_current_members(member1, member2)
+                await ctx.send(f'{member1.mention} : {points1}\n{member2.mention} : {points2}')
 
     @commands.command(name='end_game')
     async def end_game(self, ctx):
-        cur_game = self.bot.games[ctx.channel]
-        winners = cur_game.get_winners()
-        cur_game.end_game()
-        if len(winners) < 3:
-            await ctx.send('Игра окончена\n' +
-                           f'1 место: {winners[0][0].name} c {winners[0][1]} количеством очков\n' +
-                           f'2 место: {winners[1][0].name} c {winners[1][1]} количеством очков\n')
-        else:
-            await ctx.send('Игра закончена\n' +
-                           f'1 место: {winners[0][0].name} c {winners[0][1]} количеством очков\n' +
-                           f'2 место: {winners[1][0].name} c {winners[1][1]} количеством очков\n' +
-                           f'3 место: {winners[2][0].name} c {winners[2][1]} количеством очков\n')
+        if ctx.channel in self.bot.games.keys():
+            cur_game = self.bot.games[ctx.channel]
+            cur_game.endable = False
+            cur_game.startable = False
+            winners = cur_game.get_winners()
+            cur_game.end_game()
+            if len(winners) < 3:
+                await ctx.send('Игра окончена\n' +
+                               f'1 место: {winners[0][0].name} количество очков: {winners[0][1]}\n' +
+                               f'2 место: {winners[1][0].name} количество очков: {winners[1][1]}')
+            else:
+                await ctx.send('Игра закончена\n' +
+                               f'1 место: {winners[0][0].name} количество очков: {winners[0][1]} \n' +
+                               f'2 место: {winners[1][0].name} количество очков: {winners[1][1]} \n' +
+                               f'3 место: {winners[2][0].name} количество очков: {winners[2][1]} ')
+            self.bot.games.pop(ctx.channel)
 
     @commands.Cog.listener()
     async def on_command_error(self, ctx, error):
@@ -178,8 +190,12 @@ class Game:
         self.cur_round = 0
         self.rounds_to_play = None
         self.can_write_results = False
+        self.pares_that_cant_write_results = {}
         self.startable = True
         self.endable = False
+
+    def is_joinable(self):
+        return self.joinable
 
     def add_member(self, member):
         if self.joinable:
@@ -200,11 +216,14 @@ class Game:
             raise ValueError('Сбор игроков уже завершен')
 
     def end_join(self):
+        print(self.members)
         if self.joinable:
-            if len(self.members) > 1:
-                self.joinable = False
+            self.joinable = False
+            if len(self.members.keys()) > 1:
+                pass
             else:
-                raise ValueError('Нельзя начать игру, в которой нет игроков')
+                raise RuntimeError(
+                    'Нельзя начать игру, в которой нет игроков.\nНапишите "mtg! create" чтобы начать поиск заново')
         else:
             raise ValueError('Сбор игроков уже завершен')
 
@@ -229,64 +248,81 @@ class Game:
         return self.endable
 
     def make_pares(self):
-        members = [member for member in self.members.keys()]
+        if self.cur_round == 1:
+            db_sess = db_session.create_session()
+            members = [member for member in self.members.keys()]
+            members_names = [f'{member.name}#{member.discriminator}' for member in self.members.keys()]
+            players = {}
+
+            for i, member in enumerate(members_names):
+                players[members[i]] = db_sess.query(User).filter(User.username == member).first().points
+            players = [key for key, value in sorted(players.items(), key=lambda x: x[1], reverse=True)]
+
+        else:
+            players = [key for key, value in sorted(self.members.items(), key=lambda x: x[1], reverse=True)]
         pares = {}
-        if len(members) > 1:
-            if len(members) % 2 != 0:
-                pares[members[-1]] = 'auto_win'
-                for i in range(len(members) - 2):
-                    if members[i] not in pares.keys() and members[i] not in pares.values():
-                        pares[members[i]] = members[i + 1]
-            else:
-                for i in range(len(members) - 1):
-                    if members[i] not in pares.keys() and members[
-                        i] not in pares.values():
-                        pares[members[i]] = members[i + 1]
+        if len(players) % 2 != 0:
+            pares[players[-1]] = 'auto_win'
+            for i in range(len(players) - 2):
+                if players[i] not in pares.keys() and players[i] not in pares.values():
+                    pares[players[i]] = players[i + 1]
+        else:
+            for i in range(len(players) - 1):
+                if players[i] not in pares.keys() and players[i] not in pares.values():
+                    pares[players[i]] = players[i + 1]
         return pares
+
+    def find_pare(self, pares, name):
+        if name in pares.keys():
+            return name, pares[name]
+        if name in pares.values():
+            for key, value in pares.items():
+                if name == value:
+                    return key, value
 
     def give_auto_points(self, pares):
         if 'auto_win' in pares.values():
             for key, value in pares.items():
                 if value == 'auto_win':
                     self.members[key] += 2
+                    self.pares_that_cant_write_results[key] = 'auto_win'
                     break
+
+    def get_current_members(self, member1, member2):
+        return member1, self.members[member1], member2, self.members[member2]
 
     def give_points(self, member, result, pares):
         if self.can_write_results:
-            if result == 'win' or result == 'победа':
-                if member in self.members.keys():
-                    self.members[member] += 2
+            if member in self.members.keys():
+                member1, member2 = self.find_pare(pares, member)
+                if member1 not in self.pares_that_cant_write_results.keys():
+                    if result in ['win', 'lose', 'draw', 'победа', 'поражение', 'ничья']:
+                        if result == 'win' or result == 'победа':
+                            self.members[member] += 2
 
-            elif result == 'lose' or result == 'поражение':
-                if member in self.members.keys():
-                    if member in pares.keys():
-                        for key, value in pares.items():
-                            if member == key:
-                                self.members[value] += 2
-                                break
-                    elif member in pares.values():
-                        for key, value in pares.items():
-                            if member == value:
-                                self.members[key] += 2
-                                break
+                        elif result == 'lose' or result == 'поражение':
+                            if member == member2:
+                                self.members[member1] += 2
+                            if member == member1:
+                                self.members[member2] += 2
 
-            elif result == 'draw' or result == 'ничья':
-                if member in self.members.keys():
-                    if member in pares.keys():
-                        self.members[member] += 1
-                        self.members[pares[member]] += 1
-                    if member in pares.values():
-                        for key, value in pares.items():
-                            if member == value:
-                                self.members[key] += 1
-                                self.members[value] += 1
-                                break
+                        elif result == 'draw' or result == 'ничья':
+                            self.members[member1] += 1
+                            self.members[member2] += 1
+
+                        self.pares_that_cant_write_results[member1] = member2
+                    else:
+                        raise ValueError('Результат неверно указан')
+                else:
+                    raise ValueError('Ваша пара уже записала результат')
+            else:
+                raise ValueError('Вас нет в списке участников')
         else:
             raise ValueError('Сейчас не время записи результатов')
 
     def update_round(self):
         # начало нового раунда
-        if self.cur_round == self.rounds_to_play and not self.can_write_results:
+        if self.cur_round == self.rounds_to_play:
             return -1
         else:
             self.cur_round += 1
@@ -301,12 +337,14 @@ class Game:
     def end_game(self):
         # заканчивает игру (добовляет файлы в бд)
         db_sess = db_session.create_session()
-        user = db_sess.query(User).all()
-        names = {}
-        for name, point in self.members.items():
-            names[name] = point
-        for pers in user:
-            pers.points += names[pers.username]
+        games = Games(
+            players=f'{[member.name for member in self.get_members(names_only=True)]}',
+            played_date=datetime.datetime.now().date()
+        )
+        db_sess.add(games)
+        for member in self.members.keys():
+            db_sess.query(User).filter(User.username == f'{member.name}#{member.discriminator}').first().points += \
+            self.members[member]
         db_sess.commit()
 
 
