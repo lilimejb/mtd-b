@@ -1,9 +1,12 @@
 import discord
-from random import choice
+from requests import get
+import datetime as dt
 from deck_site.data import db_session
 from deck_site.data.users import User
 from deck_site.data.games import Games
+from deck_site.data.decks import Decks
 from discord.ext import commands
+from discord.ext.commands import MemberConverter
 from pprint import pprint
 import asyncio
 import datetime
@@ -27,6 +30,7 @@ class MtgCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.pares = self.bot.pares
+        self.converter = MemberConverter()
 
     @commands.command(name='create')
     async def start(self, ctx):
@@ -38,6 +42,7 @@ class MtgCommands(commands.Cog):
             'через 1 минуту регестрация закончится автоматически')
         self.bot.games[ctx.message.channel] = Game()
         await asyncio.sleep(30)
+        print(self.bot.games[ctx.message.channel].is_joinable)
         if self.bot.games[ctx.message.channel].is_joinable:
             await self.end(ctx)
 
@@ -117,6 +122,59 @@ class MtgCommands(commands.Cog):
                     await asyncio.sleep(10)
                     if cur_game.is_endable():
                         await self.end_tour(ctx)
+
+    @commands.command(name='members')
+    async def get_members(self, ctx, date):
+        db_sess = db_session.create_session()
+        date = date.split('-')
+        date = dt.datetime(int(date[0]), int(date[1]), int(date[2]), 00, 00, 00)
+        players = db_sess.query(Games).filter(Games.played_date == date).first().players[1:-1]
+        print(players)
+        to_print = ''
+        for player in players.split(', '):
+            to_print += f'{player[1:-1]}\n'
+
+        await ctx.send(f'Участники игры {date.date()}:\n{to_print}')
+
+    @commands.command(name='top3')
+    async def get_top3(self, ctx):
+        db_sess = db_session.create_session()
+        users = db_sess.query(User).all()
+        top3 = dict(sorted({user.username: user.points for user in users}.items(), key=lambda x: -x[1])[:3])
+        to_print = ''
+        counter = 1
+        for player, points in top3.items():
+            to_print += f'{counter}. {player} всего очков {points}\n'
+            counter += 1
+
+        await ctx.send(to_print)
+
+    @commands.command(name='most_popular')
+    async def get_most_popular(self, ctx):
+        db_sess = db_session.create_session()
+        users = db_sess.query(User).all()
+        most_popular = max({user.username: user.games_played for user in users}.items(), key=lambda x: x[1])[0]
+        await ctx.send(f'Игрок посетивший турниры самое большое число раз: {most_popular}')
+
+
+    @commands.command(name='deck')
+    async def get_deck(self, ctx, user):
+        db_sess = db_session.create_session()
+        try:
+            user_id = db_sess.query(User).filter(User.username == user).first().id
+        except Exception:
+            await ctx.send('Игрок не зарегестрирован')
+        else:
+            try:
+                deck_id = db_sess.query(Decks).filter(Decks.user_id == user_id).first().id
+            except Exception:
+                await ctx.send('У игрока нет зарегестрированных колод')
+            else:
+                deck = get(f'http://localhost:5000/api/deck/{deck_id}').json()['deck']
+                await ctx.send(f'Колода игрока {user}:'
+                               f'\n*{deck["name"]}*'
+                               f'\n**Основная колода**:\n```{deck["main_deck"]}```'
+                               f'\n**Сайдборд**:\n```{deck["side_board"]}```')
 
     @commands.command(name='end_tour')
     async def end_tour(self, ctx):
@@ -338,13 +396,15 @@ class Game:
         # заканчивает игру (добовляет файлы в бд)
         db_sess = db_session.create_session()
         games = Games(
-            players=f'{[member.name for member in self.get_members(names_only=True)]}',
+            players=f'{[f"{member.name}#{member.discriminator}" for member in self.get_members(names_only=True)]}',
             played_date=datetime.datetime.now().date()
         )
         db_sess.add(games)
         for member in self.members.keys():
             db_sess.query(User).filter(User.username == f'{member.name}#{member.discriminator}').first().points += \
-            self.members[member]
+                self.members[member]
+            db_sess.query(User).filter(
+                User.username == f'{member.name}#{member.discriminator}').first().games_played += 1
         db_sess.commit()
 
 

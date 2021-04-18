@@ -6,6 +6,6 @@ from wtforms.validators import DataRequired
 
 class DecksForm(FlaskForm):
     name = StringField('Название', validators=[DataRequired()])
-    content = TextAreaField("Содержание")
-    is_private = BooleanField("Личное")
+    main_deck = TextAreaField("Main Deck")
+    sideboard = TextAreaField("Sideboard")
     submit = SubmitField('Применить')

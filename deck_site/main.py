@@ -1,15 +1,17 @@
 from flask import Flask, render_template, redirect, request, abort
-from data import db_session
+from data import db_session, deck_api
 from data.users import User
 from data.decks import Decks
 from forms.user import RegisterForm, LoginForm
 from forms.deck import DecksForm
 from forms.start import  StartForm
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
+from flask_restful import Api
 
 db_session.global_init("db/mtd_decks.db")
 
 app = Flask(__name__)
+api = Api(app)
 app.config['SECRET_KEY'] = 'yandexlyceum_secret_key'
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -77,8 +79,8 @@ def add_deck():
         db_sess = db_session.create_session()
         decks = Decks()
         decks.name = form.name.data
-        decks.content = form.content.data
-        decks.is_private = form.is_private.data
+        decks.main_deck = form.main_deck.data
+        decks.side_board = form.sideboard.data
         current_user.decks.append(decks)
         db_sess.merge(current_user)
         db_sess.commit()
@@ -88,7 +90,7 @@ def add_deck():
 
 @app.route('/decks/<int:id>', methods=['GET', 'POST'])
 @login_required
-def edit_news(id):
+def edit_deck(id):
     form = DecksForm()
     if request.method == "GET":
         db_sess = db_session.create_session()
@@ -97,8 +99,8 @@ def edit_news(id):
                                           ).first()
         if decks:
             form.name.data = decks.name
-            form.content.data = decks.content
-            form.is_private.data = decks.is_private
+            form.main_deck.data = decks.main_deck
+            form.sideboard.data = decks.side_board
         else:
             abort(404)
     if form.validate_on_submit():
@@ -108,8 +110,8 @@ def edit_news(id):
                                           ).first()
         if decks:
             decks.name = form.name.data
-            decks.content = form.content.data
-            decks.is_private = form.is_private.data
+            decks.main_deck = form.main_deck.data
+            decks.side_board = form.sideboard.data
             db_sess.commit()
             return redirect('/')
         else:
@@ -119,18 +121,13 @@ def edit_news(id):
                            form=form
                            )
 
-# @app.route('/')
-# @login_required
-# def start():
-#     form = StartForm()
-#     if form.on_submit():
-#         return redirect('/login')
-#     return render_template('start.html',
-#                            title='Начальная страница',
-#                            form=form)
+@app.route('/')
+def start():
+    return redirect('/login')
 
 def main():
     db_session.global_init("db/mtd_decks.db")
+    api.add_resource(deck_api.DeckResource, '/api/deck/<int:deck_id>')
     app.run()
 
 
