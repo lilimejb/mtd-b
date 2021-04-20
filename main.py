@@ -146,13 +146,15 @@ class MtgCommands(commands.Cog):
         db_sess = db_session.create_session()
         date = date.split('-')
         date = dt.datetime(int(date[0]), int(date[1]), int(date[2]), 00, 00, 00)
-        players = db_sess.query(Games).filter(Games.played_date == date).first().players[1:-1]
+        games = db_sess.query(Games).filter(Games.played_date == date).all()
+        players = list({game.players[1:-1] for game in games})
         print(players)
         to_print = ''
-        for player in players.split(', '):
-            to_print += f'{player[1:-1]}\n'
+        for player in players:
+            if player:
+                to_print += f'{player[1:-1]}\n'
 
-        await ctx.send(f'Участники игры {date.date()}:\n{to_print}')
+        await ctx.send(f'Участники игр {date.date()}:\n{to_print}')
 
     @commands.command(name='top3')
     async def get_top3(self, ctx):
