@@ -58,10 +58,8 @@ class MtgCommands(commands.Cog):
             'Начался сбор игроков пишите "mtg! join" чтобы присоедениться,' +
             'через 1 минуту регестрация закончится автоматически')
         self.bot.games[ctx.message.channel] = Game()
-        await asyncio.sleep(30)
-        print(self.bot.games[ctx.message.channel].is_joinable)
-        if self.bot.games[ctx.message.channel].is_joinable:
-            await self.end(ctx)
+        await asyncio.sleep(60)
+        await self.end(ctx)
 
     @commands.command(name='join')
     async def join(self, ctx):
@@ -80,8 +78,8 @@ class MtgCommands(commands.Cog):
             cur_game_members = [member for member in cur_game.get_members(True)]
             try:
                 cur_game.end_join()
-            except ValueError as ex:
-                await ctx.send(ex)
+            except ValueError:
+                pass
             except RuntimeError as ex:
                 await ctx.send(ex)
                 self.bot.games.pop(ctx.channel)
@@ -95,7 +93,7 @@ class MtgCommands(commands.Cog):
                                f"{', '.join(member.mention for member in cur_game.get_members(True))}\n" +
                                f"Количество туров: {rounds_to_play}")
                 await ctx.send("Через 30 секунд автоматически начнётся 1 тур")
-                await asyncio.sleep(10)
+                await asyncio.sleep(30)
                 if cur_game.is_startable():
                     await self.start_tour(ctx)
 
@@ -139,7 +137,7 @@ class MtgCommands(commands.Cog):
                     await ctx.send(f"Паринги {tour} тура:\n" +
                                    f"{pares_to_print}\n" +
                                    'У вас есть 1 час на тур')
-                    await asyncio.sleep(10)
+                    await asyncio.sleep(360)
                     if cur_game.is_endable():
                         await self.end_tour(ctx)
 
@@ -308,7 +306,7 @@ class Game:
                 raise RuntimeError(
                     'Нельзя начать игру, в которой нет игроков.\nНапишите "mtg! create" чтобы начать поиск заново')
         else:
-            raise ValueError('Сбор игроков уже завершен')
+            raise ValueError('')
 
     def start_tour(self):
         if self.startable:

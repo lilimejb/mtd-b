@@ -4,7 +4,6 @@ from data.users import User
 from data.decks import Decks
 from forms.user import RegisterForm, LoginForm
 from forms.deck import DecksForm
-from forms.start import StartForm
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from flask_restful import Api
 
@@ -127,7 +126,9 @@ def edit_deck(id):
 
 @app.route('/')
 def start():
-    return redirect('/login')
+    if current_user.is_authenticated:
+        return redirect('/login')
+    return redirect('/decks')
 
 
 def main():
