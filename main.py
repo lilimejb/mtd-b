@@ -152,7 +152,9 @@ class MtgCommands(commands.Cog):
         to_print = ''
         for player in players:
             if player:
-                to_print += f'{player[1:-1]}\n'
+                for user in player[1:-1].split("', '"):
+                    to_print += f'{user} '
+                to_print += '\n'
 
         await ctx.send(f'Участники игр {date.date()}:\n{to_print}')
 
