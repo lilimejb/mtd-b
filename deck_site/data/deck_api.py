@@ -5,8 +5,6 @@ from . import db_session
 from .decks import Decks
 from flask_restful import abort, Resource
 
-
-
 blueprint = flask.Blueprint(
     'deck_api',
     __name__,

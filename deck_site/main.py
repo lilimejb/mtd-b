@@ -4,7 +4,7 @@ from data.users import User
 from data.decks import Decks
 from forms.user import RegisterForm, LoginForm
 from forms.deck import DecksForm
-from forms.start import  StartForm
+from forms.start import StartForm
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from flask_restful import Api
 
@@ -65,13 +65,15 @@ def login():
                                form=form)
     return render_template('login.html', title='Авторизация', form=form)
 
+
 @app.route('/logout')
 @login_required
 def logout():
     logout_user()
     return redirect("/")
 
-@app.route('/decks',  methods=['GET', 'POST'])
+
+@app.route('/decks', methods=['GET', 'POST'])
 @login_required
 def add_deck():
     form = DecksForm()
@@ -88,6 +90,7 @@ def add_deck():
     return render_template('decks.html', title='Добавление колоды',
                            form=form)
 
+
 @app.route('/decks/<int:id>', methods=['GET', 'POST'])
 @login_required
 def edit_deck(id):
@@ -95,8 +98,8 @@ def edit_deck(id):
     if request.method == "GET":
         db_sess = db_session.create_session()
         decks = db_sess.query(Decks).filter(Decks.id == id,
-                                          Decks.user == current_user
-                                          ).first()
+                                            Decks.user == current_user
+                                            ).first()
         if decks:
             form.name.data = decks.name
             form.main_deck.data = decks.main_deck
@@ -106,8 +109,8 @@ def edit_deck(id):
     if form.validate_on_submit():
         db_sess = db_session.create_session()
         decks = db_sess.query(Decks).filter(Decks.id == id,
-                                          Decks.user == current_user
-                                          ).first()
+                                            Decks.user == current_user
+                                            ).first()
         if decks:
             decks.name = form.name.data
             decks.main_deck = form.main_deck.data
@@ -121,9 +124,11 @@ def edit_deck(id):
                            form=form
                            )
 
+
 @app.route('/')
 def start():
     return redirect('/login')
+
 
 def main():
     db_session.global_init("db/mtd_decks.db")

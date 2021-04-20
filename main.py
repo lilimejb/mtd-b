@@ -32,6 +32,23 @@ class MtgCommands(commands.Cog):
         self.pares = self.bot.pares
         self.converter = MemberConverter()
 
+    @commands.command(name='info')
+    async def help(self, ctx):
+        await ctx.send('```КОМАНДЫ MTD-B```' +
+                       '```mtg! create - создаёт игру в определённом канале\n' + \
+                       'mtg! join - присоединение к игре (команду можно использовать только во время регистрации)\n' + \
+                       'mtg! end - заканчивает регистрацию\n' + \
+                       'mtg! start_tour - начинает тур, который длится 1 час, и разбивает игроков\n' + \
+                       'mtg! end_tour - заканчивает тур и начинает время на запись результатов\n' + \
+                       'mtg! parings - выводит паринг в который входит пользователь написавший сообщение\n' + \
+                       'mtg! result {win/lose/draw} - заносит результат пары в таблицу\n' + \
+                       'mtg! deck {user}{True/False} - выводит колоду игрока user(все или одну, по умолчанию все)\n' + \
+                       'mtg! members {date} - выводит участников определённой игры(если игр по данной дате найдено ' + \
+                       'больше одной выводит самую первую\n' + \
+                       'mtg! top3 - выводит 3 лучших игрока за всё время\n' + \
+                       'mtg! most_popular - выводит игрока с наибольшей посещаемостью\n' + \
+                       'mtg! end_game - выводит результаты игроков, заносит результаты в общую таблицу```')
+
     @commands.command(name='create')
     async def start(self, ctx):
         if ctx.message.channel in self.bot.games.keys():
@@ -85,6 +102,9 @@ class MtgCommands(commands.Cog):
     @commands.command(name='parings')
     async def parings(self, ctx):
         if ctx.channel in self.bot.games.keys():
+            if not self.pares:
+                await ctx.send('Для использования команды необходимо дождаться объявления парингов')
+                return
             cur_game = self.bot.games[ctx.channel]
             name = ctx.message.author
             member1, member2 = cur_game.find_pare(self.pares, name)
@@ -156,9 +176,8 @@ class MtgCommands(commands.Cog):
         most_popular = max({user.username: user.games_played for user in users}.items(), key=lambda x: x[1])[0]
         await ctx.send(f'Игрок посетивший турниры самое большое число раз: {most_popular}')
 
-
     @commands.command(name='deck')
-    async def get_deck(self, ctx, user):
+    async def get_deck(self, ctx, user, all=True):
         db_sess = db_session.create_session()
         try:
             user_id = db_sess.query(User).filter(User.username == user).first().id
@@ -166,15 +185,19 @@ class MtgCommands(commands.Cog):
             await ctx.send('Игрок не зарегестрирован')
         else:
             try:
-                deck_id = db_sess.query(Decks).filter(Decks.user_id == user_id).first().id
+                if all:
+                    decks = db_sess.query(Decks).filter(Decks.user_id == user_id).all()
+                else:
+                    decks = [db_sess.query(Decks).filter(Decks.user_id == user_id).first()]
             except Exception:
                 await ctx.send('У игрока нет зарегестрированных колод')
             else:
-                deck = get(f'http://localhost:5000/api/deck/{deck_id}').json()['deck']
-                await ctx.send(f'Колода игрока {user}:'
-                               f'\n*{deck["name"]}*'
-                               f'\n**Основная колода**:\n```{deck["main_deck"]}```'
-                               f'\n**Сайдборд**:\n```{deck["side_board"]}```')
+                for i, deck in enumerate(decks, 1):
+                    deck = get(f'http://localhost:5000/api/deck/{deck.id}').json()['deck']
+                    await ctx.send(f'{i}.Колода игрока {user}:'
+                                   f'\n*{deck["name"]}*'
+                                   f'\n**Основная колода**:\n```{deck["main_deck"]}```'
+                                   f'\n**Сайдборд**:\n```{deck["side_board"]}```')
 
     @commands.command(name='end_tour')
     async def end_tour(self, ctx):
@@ -241,6 +264,7 @@ class MtgCommands(commands.Cog):
             print(error)
 
 
+# оснвной класс игры
 class Game:
     def __init__(self):
         self.members = {}
@@ -255,6 +279,7 @@ class Game:
     def is_joinable(self):
         return self.joinable
 
+    # добавляет пользователя в игру
     def add_member(self, member):
         if self.joinable:
             if member in self.members.keys():
@@ -273,8 +298,8 @@ class Game:
         else:
             raise ValueError('Сбор игроков уже завершен')
 
+    # заканчивает регестрацию игроков
     def end_join(self):
-        print(self.members)
         if self.joinable:
             self.joinable = False
             if len(self.members.keys()) > 1:
