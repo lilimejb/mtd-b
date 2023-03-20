@@ -11,7 +11,7 @@ from pprint import pprint
 import asyncio
 import datetime
 
-TOKEN = "ODI3NTcwMjAyNTcyNjE5ODU2.YGc8zw.l_wWjYdHwvwZX8jc8HnT03BayvU"
+TOKEN = "TOKEN"
 db_session.global_init("deck_site/db/mtd_decks.db")
 
 
